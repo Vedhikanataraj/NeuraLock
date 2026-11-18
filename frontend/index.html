@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NeuraLock</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1915;
+      --muted: #5c564c;
+      --line: #d9d1c5;
+      --paper: #f6f1e8;
+      --card: #fffdf8;
+      --accent: #0f6e56;
+      --danger: #8c2f2f;
+      --warn: #8a5a12;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    header, main { width: min(1100px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 28px 0 8px; }
+    h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.03em; }
+    h2 { font-size: 1rem; margin: 0 0 12px; }
+    p { color: var(--muted); }
+    .identity { font-size: 0.92rem; }
+    main { display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 16px; padding-bottom: 40px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .stack { display: grid; gap: 16px; }
+    form { display: grid; gap: 8px; }
+    input, textarea, button {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: 0;
+      cursor: pointer;
+    }
+    button.quiet {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--line);
+    }
+    .turn { padding: 8px 0; border-top: 1px solid var(--line); }
+    .turn strong { text-transform: capitalize; }
+    .meta { color: var(--muted); font-size: 0.82rem; }
+    .event { font-size: 0.88rem; padding: 8px 0; border-top: 1px solid var(--line); }
+    .risk-high { color: var(--danger); }
+    .risk-medium { color: var(--warn); }
+    .error { color: var(--danger); min-height: 1.2em; }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>NeuraLock</h1>
+    <p class="identity" id="identity">Loading local identity…</p>
+  </header>
+  <main>
+    <section>
+      <h2>Chat</h2>
+      <div id="transcript"></div>
+      <form id="chat-form">
+        <textarea id="message" placeholder="Ask a question" required></textarea>
+        <button type="submit">Send</button>
+        <div class="error" id="chat-error"></div>
+      </form>
+    </section>
+    <div class="stack">
+      <section>
+        <h2>Documents</h2>
+        <form id="doc-form">
+          <input id="doc-title" placeholder="Title" required>
+          <textarea id="doc-content" placeholder="Content" required></textarea>
+          <label><input type="checkbox" value="employee" checked> employee</label>
+          <label><input type="checkbox" value="manager"> manager</label>
+          <label><input type="checkbox" value="admin" checked> admin</label>
+          <button type="submit">Save document</button>
+          <div class="error" id="doc-error"></div>
+        </form>
+        <div id="documents"></div>
+      </section>
+      <section>
+        <h2>Security events</h2>
+        <div id="events"></div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const API_BASE = "http://127.0.0.1:8001";
+    let conversationId = null;
+
+   async function api(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(body.detail || "Request failed");
+  }
+
+  return body;
+}
+    function rolesFromForm() {
+      return [...document.querySelectorAll("#doc-form input[type=checkbox]:checked")]
+        .map((box) => box.value);
+    }
+
+    async function loadIdentity() {
+      const body = await api("/api/identity");
+      document.getElementById("identity").textContent =
+        `Organisation ${body.organisation_id} · role ${body.role}. The role comes from the server, not this page.`;
+    }
+
+    async function loadDocuments() {
+      const body = await api("/api/documents");
+      const root = document.getElementById("documents");
+      root.innerHTML = "";
+      if (!body.documents.length) {
+        root.innerHTML = "<p>No documents for this role.</p>";
+        return;
+      }
+      for (const item of body.documents) {
+        const row = document.createElement("div");
+        row.className = "turn";
+        row.innerHTML = `<strong></strong><div class="meta"></div>`;
+        row.querySelector("strong").textContent = item.title;
+        row.querySelector(".meta").textContent = item.allowed_roles.join(", ");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "quiet";
+        button.textContent = "Deactivate";
+        button.addEventListener("click", async () => {
+          document.getElementById("doc-error").textContent = "";
+          try {
+            await api(`/api/documents/${item.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ is_active: false }),
+            });
+            await Promise.all([loadDocuments(), loadEvents()]);
+          } catch (error) {
+            document.getElementById("doc-error").textContent = error.message;
+          }
+        });
+        row.append(button);
+        root.append(row);
+      }
+    }
+
+    async function loadEvents() {
+      const events = await api("/api/security/events?limit=8");
+      const root = document.getElementById("events");
+      root.innerHTML = "";
+      if (!events.length) {
+        root.innerHTML = "<p>No events yet.</p>";
+        return;
+      }
+      for (const event of events) {
+        const row = document.createElement("div");
+        row.className = "event";
+        row.innerHTML = `<strong class="risk-${event.risk_level}"></strong><div class="meta"></div>`;
+        row.querySelector("strong").textContent =
+          `${event.action_taken} · ${event.risk_level}`;
+        row.querySelector(".meta").textContent = event.reason;
+        root.append(row);
+      }
+    }
+
+    document.getElementById("chat-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.getElementById("chat-error");
+      error.textContent = "";
+      const message = document.getElementById("message").value.trim();
+      if (!message) return;
+      try {
+        const body = await api("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({ message, conversation_id: conversationId }),
+        });
+        conversationId = body.conversation_id;
+        const transcript = document.getElementById("transcript");
+        const user = document.createElement("div");
+        user.className = "turn";
+        user.innerHTML = "<strong>You</strong><div></div>";
+        user.querySelector("div").textContent = message;
+        const assistant = document.createElement("div");
+        assistant.className = "turn";
+        assistant.innerHTML = "<strong>NeuraLock</strong><div></div><div class='meta'></div>";
+        assistant.querySelector("div").textContent = body.reply;
+        assistant.querySelector(".meta").textContent =
+          `${body.action} · ${body.risk}` +
+          (body.documents_in_context.length
+            ? ` · ${body.documents_in_context.join(", ")}`
+            : "");
+        transcript.append(user, assistant);
+        document.getElementById("message").value = "";
+        await loadEvents();
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    });
+
+    document.getElementById("doc-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.getElementById("doc-error");
+      error.textContent = "";
+      const roles = rolesFromForm();
+      if (!roles.length) {
+        error.textContent = "Choose at least one role.";
+        return;
+      }
+      try {
+        await api("/api/documents", {
+          method: "POST",
+          body: JSON.stringify({
+            title: document.getElementById("doc-title").value.trim(),
+            content: document.getElementById("doc-content").value.trim(),
+            allowed_roles: roles,
+          }),
+        });
+        document.getElementById("doc-form").reset();
+        document.querySelector("#doc-form input[value=employee]").checked = true;
+        document.querySelector("#doc-form input[value=admin]").checked = true;
+        await Promise.all([loadDocuments(), loadEvents()]);
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    });
+
+    Promise.all([loadIdentity(), loadDocuments(), loadEvents()]).catch((error) => {
+      document.getElementById("identity").textContent = error.message;
+    });
+  </script>
+</body>
+</html>
