@@ -97,14 +97,12 @@ flowchart TD
 | Testing | Pytest |
 | Development Environment | Visual Studio Code |
 
-## 🔑 Identity and Access Control
+## Identity and Access Control
 
-NeuraLock uses server-configured identity settings rather than accepting a user-supplied role in individual chat requests.
+NeuraLock now uses individual accounts and expiring bearer sessions. On first launch, the UI prompts you to create the initial administrator account. Organisation IDs use `NL` followed by four digits (`NL0001` through `NL9999`); first-run setup defaults to `NL0001`. Use a unique username and a password of at least 12 characters. Administrators can create employee, manager, and admin accounts from the UI. Passwords are stored as PBKDF2 hashes, and session tokens expire after 12 hours.
 
 | Environment Variable | Default | Purpose |
 |---|---|---|
-| `NEURALOCK_ORGANISATION_ID` | `local` | Identifies the document library |
-| `NEURALOCK_ROLE` | `admin` | Sets the gateway's configured role |
 | `NEURALOCK_DATABASE_URL` | `sqlite:///./neuralock.db` | Configures the database |
 | `NEURALOCK_LLM_BASE_URL` | `http://127.0.0.1:11434` | Local model API address |
 | `NEURALOCK_LLM_MODEL` | `llama3.2` | Model identifier |
@@ -115,11 +113,11 @@ Supported roles:
 - `manager`
 - `admin`
 
-Only the administrator can create, update and deactivate documents. Document retrieval and chat context are restricted to active documents whose allowed roles include the configured role.
+Only administrators can create, update and deactivate documents. Document retrieval and chat context are restricted to active documents in the signed-in user's organisation whose allowed roles include that user's server-side role. Chat history and event views are scoped to the signed-in user; administrators can view security events for their organisation.
 
 The administrator role is retained when saving document permissions.
 
-**Security note:** The current identity configuration is gateway-level. Individual user authentication and production-grade identity management are planned enhancements.
+**Local deployment note:** Keep the development server bound to localhost. The built-in in-memory rate limiter is intended for local use; a shared persistent limiter and production deployment review are still needed before exposing the gateway to a network.
 
 ## 🚀 Getting Started
 
@@ -199,6 +197,8 @@ Start your compatible local model service and configure these environment variab
 
 NeuraLock can return a policy-based response when the model is unavailable.
 
+On the first visit to `/ui/`, create the initial administrator. After signing in, administrators can create user accounts in the **Create user** panel.
+
 ## 🧪 Testing
 
 NeuraLock includes automated tests for its chat security and document authorization workflows.
@@ -210,9 +210,9 @@ cd backend
 ..\.venv\Scripts\python.exe -m pytest -v
 ```
 
-### Current Test Results
+### Recorded Test Results
 
-**11 tests passed, 0 failed.**
+The last recorded result before the authentication and ownership changes was **11 tests passed, 0 failed**. The test suite has not yet been adapted or rerun against the new authenticated API.
 
 Coverage includes:
 
@@ -239,6 +239,7 @@ NeuraLock/
 │   │   │   ├── data_protection.py
 │   │   │   └── prompt_detector.py
 │   │   ├── chatbot.py
+│   │   ├── auth.py
 │   │   ├── db.py
 │   │   ├── main.py
 │   │   ├── models.py
@@ -249,18 +250,20 @@ NeuraLock/
 │
 ├── frontend/
 │   └── index.html
+│   └── app.js
 │
 ├── ml/
-│   └── inspect_dataset.py
+│   ├── inspect_dataset.py
+│   └── evaluate_security.py
 │
 ├── docs/
 ├── .gitignore
 └── README.md
 ```
 
-## 🗺️ Development Roadmap
+## Development Roadmap
 
-NeuraLock is under active development.
+NeuraLock is under active development. The roadmap below separates implemented capabilities from planned work.
 
 ### Phase 1 — Security Foundation
 - [x] FastAPI security gateway
@@ -271,20 +274,35 @@ NeuraLock is under active development.
 - [x] Security event logging
 - [x] Automated security tests
 
-### Phase 2 — Machine Learning Detection
-- [ ] Prepare and label prompt injection datasets
-- [ ] Develop an ML-based prompt classifier
-- [ ] Evaluate precision, recall and F1-score
-- [ ] Analyse false-positive and false-negative rates
-- [ ] Integrate the classifier into the security pipeline
+### Phase 2 — Security Evaluation and Detection
+- [ ] Build a labeled evaluation set for direct and indirect prompt injection, sensitive data, and safe requests.
+- [x] Add a JSONL evaluation utility that reports precision, recall, F1-score, and false-positive rate for prompt injection detection.
+- [x] Expand injection and sensitive-data coverage beyond the initial regex patterns.
+- [ ] Add adversarial evaluation for obfuscation, multilingual prompts, and malicious instructions embedded in documents.
+- [ ] Consider an ML-based classifier after establishing reproducible evaluation baselines.
 
-### Phase 3 — Advanced AI Gateway
-- [ ] Improve request and response inspection
-- [ ] Strengthen policy enforcement
-- [ ] Expand model compatibility
-- [ ] Introduce advanced security analytics
+### Phase 3 — Authentication and Data Ownership
+- [x] Add individual user authentication and expiring session management.
+- [x] Associate conversations and security events with their owning user and organisation.
+- [x] Enforce ownership checks on chat history and user-specific event views.
+- [x] Replace the shared environment-level role with authenticated, server-verified roles.
+- [ ] Add authorization tests for cross-user and cross-organisation access.
 
-### Phase 4 — Authentication and Production Security
-- [ ] Individual user authentication
-- [ ] Stronger identity and organization isolation
-- [ ]
+### Phase 4 — Safer Knowledge Retrieval
+- [x] Retrieve only relevant documents from the user's authorized active documents.
+- [x] Preserve role and organisation authorization before retrieval and before adding content to model context.
+- [x] Include document IDs and titles in the model context and decision metadata.
+- [x] Reject document content with hidden formatting marks or known suspicious instruction patterns.
+- [ ] Add tests for poisoned documents, stale permissions, and cross-organisation retrieval.
+
+### Phase 5 — Output and Service Hardening
+- [x] Validate model response actions and keep generated content rendered as text in the browser.
+- [x] Add per-client request throttling, bounded model timeouts, and response security headers.
+- [x] Avoid logging raw prompts and redact supported sensitive patterns in model context and responses.
+- [ ] Add a shared rate limiter and production deployment settings before network exposure.
+
+### Phase 6 — Security Dashboard and Operations
+- [x] Add event filters for risk level and action, with user or organisation scoping.
+- [x] Add event summaries for high-risk events, redactions, and refusals while avoiding raw prompt storage.
+- [ ] Add detector performance and model availability trends over time.
+- [ ] Add export and retention controls for authorized administrators.

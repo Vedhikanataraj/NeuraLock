@@ -1,6 +1,6 @@
 
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, JSON
+from sqlalchemy import Boolean, JSON, ForeignKey
 from sqlalchemy import Column, DateTime, Integer, String, Text
 
 from app.db import Base
@@ -19,6 +19,8 @@ class SecurityEvent(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    organisation_id = Column(String(100), nullable=True, index=True)
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
 
@@ -28,6 +30,7 @@ class KnowledgeDocument(Base):
     content = Column(Text, nullable=False)
     allowed_roles = Column(JSON, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 
 class Conversation(Base):
@@ -39,6 +42,8 @@ class Conversation(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    organisation_id = Column(String(100), nullable=True, index=True)
 
 
 class ChatTurn(Base):
@@ -54,3 +59,23 @@ class ChatTurn(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), nullable=False, unique=True, index=True)
+    password_hash = Column(String(300), nullable=False)
+    organisation_id = Column(String(100), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default="employee")
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(Integer, primary_key=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)

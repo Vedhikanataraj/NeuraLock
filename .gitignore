@@ -1,7 +1,26 @@
+# Python environments and bytecode
 .venv/
-ml/.venv/
+**/.venv/
 **/__pycache__/
+*.py[cod]
+
+# Test and coverage output
 .pytest_cache/
-*.db
+.coverage
+.coverage.*
+htmlcov/
+
+# Local configuration and secrets
 .env
-*.pyc
+.env.*
+!.env.example
+
+# Local SQLite databases and journal files
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Runtime logs
+*.log

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NeuraLock</title>
+  <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg">
   <style>
     :root {
       color-scheme: light;
@@ -63,14 +64,29 @@
     .risk-high { color: var(--danger); }
     .risk-medium { color: var(--warn); }
     .error { color: var(--danger); min-height: 1.2em; }
+    #auth-panel { max-width: 520px; margin: 24px auto; }
+    #app-shell[hidden], #auth-panel[hidden] { display: none; }
     @media (max-width: 800px) {
       main { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
+  <section id="auth-panel" hidden>
+    <h2 id="auth-title">Sign in to NeuraLock</h2>
+    <p id="auth-help">Use your NeuraLock account.</p>
+    <form id="auth-form">
+      <input id="auth-username" autocomplete="username" placeholder="Username" required>
+      <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password (12+ characters)" required>
+      <input id="auth-org" placeholder="Organisation ID (NL0001–NL9999)" value="NL0001" pattern="NL[0-9]{4}" title="Use NL followed by four digits, such as NL0001." hidden>
+      <button type="submit">Continue</button>
+      <div class="error" id="auth-error"></div>
+    </form>
+  </section>
+  <div id="app-shell" hidden>
   <header>
     <h1>NeuraLock</h1>
+    <button id="logout" type="button" class="quiet">Sign out</button>
     <p class="identity" id="identity">Loading local identity…</p>
   </header>
   <main>
@@ -97,162 +113,26 @@
         </form>
         <div id="documents"></div>
       </section>
+      <section id="user-admin" hidden>
+        <h2>Create user</h2>
+        <form id="user-form">
+          <input id="new-username" placeholder="Username" minlength="3" required>
+          <input id="new-password" type="password" placeholder="Temporary password (12+ characters)" minlength="12" required>
+          <select id="new-role"><option value="employee">employee</option><option value="manager">manager</option><option value="admin">admin</option></select>
+          <button type="submit">Create account</button>
+          <div class="error" id="user-error"></div>
+        </form>
+      </section>
       <section>
         <h2>Security events</h2>
+        <div class="meta" id="event-summary"></div>
+        <label>Risk <select id="event-risk"><option value="">All</option><option>low</option><option>medium</option><option>high</option></select></label>
+        <label>Action <select id="event-action"><option value="">All</option><option>answer</option><option>redact_then_answer</option><option>refuse_message</option><option>ask_rephrase</option></select></label>
         <div id="events"></div>
       </section>
     </div>
   </main>
-  <script>
-    const API_BASE = "http://127.0.0.1:8001";
-    let conversationId = null;
-
-   async function api(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-
-  const body = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(body.detail || "Request failed");
-  }
-
-  return body;
-}
-    function rolesFromForm() {
-      return [...document.querySelectorAll("#doc-form input[type=checkbox]:checked")]
-        .map((box) => box.value);
-    }
-
-    async function loadIdentity() {
-      const body = await api("/api/identity");
-      document.getElementById("identity").textContent =
-        `Organisation ${body.organisation_id} · role ${body.role}. The role comes from the server, not this page.`;
-    }
-
-    async function loadDocuments() {
-      const body = await api("/api/documents");
-      const root = document.getElementById("documents");
-      root.innerHTML = "";
-      if (!body.documents.length) {
-        root.innerHTML = "<p>No documents for this role.</p>";
-        return;
-      }
-      for (const item of body.documents) {
-        const row = document.createElement("div");
-        row.className = "turn";
-        row.innerHTML = `<strong></strong><div class="meta"></div>`;
-        row.querySelector("strong").textContent = item.title;
-        row.querySelector(".meta").textContent = item.allowed_roles.join(", ");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "quiet";
-        button.textContent = "Deactivate";
-        button.addEventListener("click", async () => {
-          document.getElementById("doc-error").textContent = "";
-          try {
-            await api(`/api/documents/${item.id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ is_active: false }),
-            });
-            await Promise.all([loadDocuments(), loadEvents()]);
-          } catch (error) {
-            document.getElementById("doc-error").textContent = error.message;
-          }
-        });
-        row.append(button);
-        root.append(row);
-      }
-    }
-
-    async function loadEvents() {
-      const events = await api("/api/security/events?limit=8");
-      const root = document.getElementById("events");
-      root.innerHTML = "";
-      if (!events.length) {
-        root.innerHTML = "<p>No events yet.</p>";
-        return;
-      }
-      for (const event of events) {
-        const row = document.createElement("div");
-        row.className = "event";
-        row.innerHTML = `<strong class="risk-${event.risk_level}"></strong><div class="meta"></div>`;
-        row.querySelector("strong").textContent =
-          `${event.action_taken} · ${event.risk_level}`;
-        row.querySelector(".meta").textContent = event.reason;
-        root.append(row);
-      }
-    }
-
-    document.getElementById("chat-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const error = document.getElementById("chat-error");
-      error.textContent = "";
-      const message = document.getElementById("message").value.trim();
-      if (!message) return;
-      try {
-        const body = await api("/api/chat", {
-          method: "POST",
-          body: JSON.stringify({ message, conversation_id: conversationId }),
-        });
-        conversationId = body.conversation_id;
-        const transcript = document.getElementById("transcript");
-        const user = document.createElement("div");
-        user.className = "turn";
-        user.innerHTML = "<strong>You</strong><div></div>";
-        user.querySelector("div").textContent = message;
-        const assistant = document.createElement("div");
-        assistant.className = "turn";
-        assistant.innerHTML = "<strong>NeuraLock</strong><div></div><div class='meta'></div>";
-        assistant.querySelector("div").textContent = body.reply;
-        assistant.querySelector(".meta").textContent =
-          `${body.action} · ${body.risk}` +
-          (body.documents_in_context.length
-            ? ` · ${body.documents_in_context.join(", ")}`
-            : "");
-        transcript.append(user, assistant);
-        document.getElementById("message").value = "";
-        await loadEvents();
-      } catch (err) {
-        error.textContent = err.message;
-      }
-    });
-
-    document.getElementById("doc-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const error = document.getElementById("doc-error");
-      error.textContent = "";
-      const roles = rolesFromForm();
-      if (!roles.length) {
-        error.textContent = "Choose at least one role.";
-        return;
-      }
-      try {
-        await api("/api/documents", {
-          method: "POST",
-          body: JSON.stringify({
-            title: document.getElementById("doc-title").value.trim(),
-            content: document.getElementById("doc-content").value.trim(),
-            allowed_roles: roles,
-          }),
-        });
-        document.getElementById("doc-form").reset();
-        document.querySelector("#doc-form input[value=employee]").checked = true;
-        document.querySelector("#doc-form input[value=admin]").checked = true;
-        await Promise.all([loadDocuments(), loadEvents()]);
-      } catch (err) {
-        error.textContent = err.message;
-      }
-    });
-
-    Promise.all([loadIdentity(), loadDocuments(), loadEvents()]).catch((error) => {
-      document.getElementById("identity").textContent = error.message;
-    });
-  </script>
+  <script src="/ui/app.js" defer></script>
+</div>
 </body>
 </html>

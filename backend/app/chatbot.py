@@ -122,7 +122,8 @@ def _document_block(documents: list[dict]) -> str:
     parts = ["document_context:"]
     for document in documents:
         protected = protect_sensitive_data(document["content"])
-        parts.append(f"title: {document['title']}\ncontent:\n{protected['text']}")
+        document_id = document.get("id", "unknown")
+        parts.append(f"document_id: {document_id}\ntitle: {document['title']}\ncontent:\n{protected['text']}")
     return "\n\n".join(parts)
 
 
@@ -155,7 +156,7 @@ def ask_model(messages: list[dict]) -> str | None:
                 "messages": messages,
                 "options": {"temperature": 0},
             },
-            timeout=90,
+            timeout=httpx.Timeout(30.0, connect=3.0),
         )
         response.raise_for_status()
         content = response.json().get("message", {}).get("content")
@@ -221,7 +222,7 @@ def decide_next_action(
         risk = "low"
         signal = "No injection rule or sensitive-data pattern matched."
 
-    titles = [document["title"] for document in in_context]
+    titles = [f"{document.get('id', 'unknown')}: {document['title']}" for document in in_context]
     if titles:
         signal = f'{signal} Documents in context: {", ".join(titles)}.'
 
